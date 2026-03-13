@@ -1,22 +1,13 @@
 # sage_setup: distribution = sagemath-categories
 
-from cpython cimport Py_ssize_t
-from sage.data_structures.arbitrary_indexed_container_base cimport (
-    Arbitrary_Indexed_Container_Base
-)
-
-cdef class Arbitrary_Indexed_Container_Basic(Arbitrary_Indexed_Container_Base):
-
+cdef class Arbitrary_Indexed_Container_Basic:
     def __init__(self, obj_array=None, _value_array=None):
+        self._length = 0
+        self._value_array = []
         self._obj_to_idx = {}
-        super().__init__(obj_array=obj_array,
-                         _value_array=_value_array)
+        self._initialize_container(obj_array, _value_array)
 
-    cdef void _initialize_container(
-            self,
-            object obj_array,
-            object _value_array):
-
+    cdef void _initialize_container(self, list obj_array, list _value_array):
         if (obj_array is None) != (_value_array is None):
             raise AssertionError("obj_array and _value_array must both be None or both not None")
 
@@ -35,21 +26,20 @@ cdef class Arbitrary_Indexed_Container_Basic(Arbitrary_Indexed_Container_Base):
         for i in range(self._length):
             self._obj_to_idx[obj_array[i]] = i
 
-    cpdef object __getitem__(self, object key):
+    def __len__(self):
+        return self._length
+
+    def __getitem__(self, object key):
 
         cdef Py_ssize_t idx
-
         if isinstance(key, slice):
             raise NotImplementedError("Slicing not yet implemented for Basic container.")
 
         if key not in self._obj_to_idx:
             raise AssertionError(f"Object {key} not found.")
-
         idx = self._obj_to_idx[key]
-
         if idx < 0 or idx >= self._length:
             raise AssertionError(f"Index {idx} out of bounds.")
-
         return self._value_array[idx]
 
     cpdef void append(self, object obj, object value):
@@ -61,8 +51,8 @@ cdef class Arbitrary_Indexed_Container_Basic(Arbitrary_Indexed_Container_Base):
         self._value_array.append(value)
         self._length += 1
 
-    cpdef void insert(self,
-                      Py_ssize_t idx,
-                      object obj,
-                      object value):
-        raise NotImplementedError("Insert not implemented for Basic container.")
+    cpdef void extend(self, object obj_array, object _value_array):
+        raise NotImplementedError("extend not implemented.")
+
+    cpdef object get_contiguous_array(self):
+        raise NotImplementedError("get_contiguous_array not implemented.")
