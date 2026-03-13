@@ -19,11 +19,13 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
     cdef Py_ssize_t _num_regions
     cdef Py_ssize_t _reinitialize_ratio
 
-    cdef void _initialize_container(self, object key_array, object value_array)
+    cdef bint _lazy_reinitialize_required
+
+    cdef void _initialize_container(self, list key_array, list value_array)
 
     cpdef object get_contiguous_array(self)
     cpdef void append(self, object key, object value)
+    cpdef void extend(self, list key_array, list value_array)
     cpdef void insert(self, Py_ssize_t idx, object key, object value)
-    # cdef void _assert_no_duplicate_key(self, object key)
     cpdef void reinitialize_container(self)
     cpdef int index(self, object key)

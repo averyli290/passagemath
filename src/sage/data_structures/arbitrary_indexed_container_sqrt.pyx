@@ -14,9 +14,15 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
         self._regions_key_values = []
         self._region_size = []
 
+        # Whether or not the container needs to be reinitialized
+        # Reinitialization required when container imbalanced and
+        # and on __getitem__(slice) or insert
+        # append, _initialize_container, reinitialize_container, __len__, index, __getitem__(index)
+        self._lazy_reinitialize_required = False 
+
         self._initialize_container(key_array=key_array, value_array=value_array)
 
-    cdef void _initialize_container(self, object key_array, object value_array):
+    cdef void _initialize_container(self, list key_array, list value_array):
 
         if (key_array is None) != (value_array is None):
             raise AssertionError("Arrays must both be None or both not None")
@@ -57,6 +63,8 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
             self._region_size[region_idx] += 1
 
             self._key_to_position[key] = (region_idx, offset)
+        
+        self._lazy_reinitialize_required = False
 
     def __len__(self):
         return self._length
@@ -109,8 +117,11 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
             region_idx, offset = self._key_to_position[key]
             return self._regions[region_idx][offset]
         else:
-            result = []
+            # Check if container should be rebuilt first
+            if self._lazy_reinitialize_required:
+                self.reinitialize_container()
 
+            result = []
 
             start_region_idx, start_region_internal_idx = self._key_to_position[key.start]
             stop_region_idx, stop_region_internal_idx = self._key_to_position[key.stop]
@@ -137,14 +148,14 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
             #   1. start region < stop region
             #   2. start region == stop region
             if start_region_idx < stop_region_idx:
-                # Add start region
+                # Add values in start region
                 result.extend(self._regions[start_region_idx][start_region_internal_idx:])
                 
-                # Add regions between start and stop regions
-                for i in range(start_region_idx + 1, stop_region_idx - 1):
+                # Add values in regions between start and stop regions
+                for i in range(start_region_idx + 1, stop_region_idx):
                     result.extend(self._regions[i])
                 
-                # Add stop region
+                # Add values in stop region
                 result.extend(self._regions[stop_region_idx][:stop_region_internal_idx])
 
             else:
@@ -157,15 +168,16 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
             else:
                 return result[::key.step]
 
-
     def __setitem__(self, object key, object value):
 
+        # If key already exists, set the item
         if key in self._key_to_position:
 
             region_idx, offset = self._key_to_position[key]
             self._regions[region_idx][offset] = value
             return
 
+        # Otherwise, append it to the end
         self.append(key, value)
 
     cpdef object get_contiguous_array(self):
@@ -208,14 +220,68 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
         self._region_size[region_idx] += 1
         self._length += 1
 
+        # Check if data structure is inefficient
         if self._region_size[region_idx] > self._reinitialize_ratio * self._sqrtval:
-            self.reinitialize_container()
+            # Indicate that reinialization is required now
+            # that the data structure has become inefficient
+            self._lazy_reinitialize_required = True
+    
+    cpdef void extend(self, list key_array, list value_array):
+        """
+        Append multiple key/value pairs directly into the last region.
+        Marks the container for lazy reinitialization if the region grows too large.
+
+        INPUT:
+            key_array   -- list of keys
+            value_array -- list of corresponding values
+
+        Raises AssertionError if any key already exists.
+        """
+        cdef Py_ssize_t n, i, region_idx, offset
+        n = len(key_array)
+        if n != len(value_array):
+            raise AssertionError("Lengths of key_array and value_array must match")
+
+        # Check for duplicates before appending
+        for i in range(n):
+            if key_array[i] in self._key_to_position:
+                raise AssertionError(f"{key_array[i]} already exists")
+
+        # Make sure at least one region exists
+        if len(self._regions) == 0:
+            self._regions.append([])
+            self._regions_key_values.append([])
+            self._region_size.append(0)
+            self._num_regions += 1
+
+        # Get last region index and the offset
+        region_idx = max(0, self._num_regions - 1)
+        offset = self._region_size[region_idx]
+
+        # Extend the last region directly
+        self._regions[region_idx].extend(value_array)
+        self._regions_key_values[region_idx].extend(key_array)
+        self._region_size[region_idx] += n
+        self._length += n
+
+        # Add _key_to_position mapping for new keys
+        for i in range(n):
+            self._key_to_position[key_array[i]] = (region_idx, offset)
+            offset += 1
+
+        # Mark lazy reinitialization if region grew too large
+        if self._region_size[region_idx] > self._reinitialize_ratio * self._sqrtval:
+            self._lazy_reinitialize_required = True
 
     cpdef void insert(self, Py_ssize_t idx, object key, object value):
 
         cdef Py_ssize_t region_idx = 0
         cdef Py_ssize_t region_start = 0
         cdef Py_ssize_t insert_offset
+
+        # Check if container should be rebuilt first
+        if self._lazy_reinitialize_required:
+            self.reinitialize_container()
 
         if idx < 0 or idx > self._length:
             raise AssertionError("Invalid index")
@@ -250,5 +316,8 @@ cdef class Arbitrary_Indexed_Container_Sqrt:
             k = self._regions_key_values[region_idx][j]
             self._key_to_position[k] = (region_idx, j)      # Update offset to new index
 
+        # Check if data structure is inefficient
         if self._region_size[region_idx] > self._reinitialize_ratio * self._sqrtval:
-            self.reinitialize_container()
+            # Indicate that reinialization is required now
+            # that the data structure has become inefficient
+            self._lazy_reinitialize_required = True
